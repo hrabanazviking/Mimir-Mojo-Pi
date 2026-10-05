@@ -161,7 +161,7 @@ Mimir-Mojo-Pi/
 | Patch written (`tcmalloc-39bit-va.patch`) | ✅ Done |
 | x86_64 build + tests (48-bit kernel) | ✅ All checks passed — bit-identical behavior |
 | Raspberry Pi 5 A/B test (39-bit kernel) | ✅ Done — pristine lib aborts (exact bug repro); patched lib: 39-bit, all checks pass |
-| Upstream PR to google/tcmalloc (issue #82) | ⏳ After Volmarr's review + rebase onto tcmalloc master |
+| Upstream PR to google/tcmalloc (issue #82) | 🚀 Ready — fix branch `fix/39bit-va-aarch64` pushed to [hrabanazviking/tcmalloc](https://github.com/hrabanazviking/tcmalloc/tree/fix/39bit-va-aarch64) (commit `5447295`); PR creation needs Volmarr's click: [open the PR](https://github.com/google/tcmalloc/compare/master...hrabanazviking:fix/39bit-va-aarch64) |
 
 ## Building and testing
 
