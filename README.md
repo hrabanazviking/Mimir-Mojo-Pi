@@ -1,4 +1,4 @@
-![Mimir-Mojo-Pi_ Mythic_Tech_Forge.png](Mimir-Mojo-Pi_ Mythic_Tech_Forge.png)
+![[Mimir-Mojo-Pi_ Mythic_Tech_Forge.png](Mimir-Mojo-Pi_ Mythic_Tech_Forge.png)
 
 # Mimir-Mojo-Pi
 
