@@ -32,6 +32,12 @@ memory allocator, and it affects every 39-bit ARM64 Linux kernel — Raspberry P
 OS, many Android kernels, and other distros that build `arm64` with
 `CONFIG_ARM64_VA_BITS=39` instead of 48.
 
+---
+
+ ![https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/M%C3%ADmir-Mojo-Pi_The_Address_Space_Saga.png](https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/M%C3%ADmir-Mojo-Pi_The_Address_Space_Saga.png)
+
+---
+
 ## Root cause
 
 The failure chain, traced through Modular's public build definitions:
