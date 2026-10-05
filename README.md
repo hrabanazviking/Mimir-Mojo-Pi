@@ -121,6 +121,12 @@ things that actually generate or interpret addresses:
 Design trade-offs, edge cases (47-bit Pi 5 configs, 52-bit kernels), and the
 full test matrix are documented in [`PATCH.md`](PATCH.md).
 
+---
+
+![https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/M%C3%ADmirs_Neon_Rune_Well.png](https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/M%C3%ADmirs_Neon_Rune_Well.png)
+
+---
+
 ## Repository layout
 
 ```
