@@ -1,4 +1,4 @@
-![Mimir-Mojo-Pi_ Mythic_Tech_Forge.png](Mimir-Mojo-Pi_ Mythic_Tech_Forge.png)
+![https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/Mimir-Mojo-Pi_Mythic_Tech_Forge.png](https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/Mimir-Mojo-Pi_Mythic_Tech_Forge.png)
 
 # Mimir-Mojo-Pi
 
