@@ -1,0 +1,549 @@
+diff --git a/tcmalloc/huge_page_aware_allocator_fuzz.cc b/tcmalloc/huge_page_aware_allocator_fuzz.cc
+index f5e0a2fa..f48fecd3 100644
+--- a/tcmalloc/huge_page_aware_allocator_fuzz.cc
++++ b/tcmalloc/huge_page_aware_allocator_fuzz.cc
+@@ -72,10 +72,10 @@ struct FuzzHugePageAwareAllocatorOptions {
+ 
+   explicit operator HugePageAwareAllocatorOptions() const {
+     HugePageAwareAllocatorOptions options;
+-    // Roundtrip the tag through kTagMask.  Under some sanitizers, we restrict
++    // Roundtrip the tag through TagMask().  Under some sanitizers, we restrict
+     // the width of the tag.
+     options.tag = static_cast<MemoryTag>(
+-        ((static_cast<uintptr_t>(tag) << kTagShift) & kTagMask) >> kTagShift);
++        ((static_cast<uintptr_t>(tag) << TagShift()) & TagMask()) >> TagShift());
+     options.use_huge_region_more_often = use_huge_region_more_often;
+     return options;
+   }
+diff --git a/tcmalloc/huge_page_aware_allocator_test.cc b/tcmalloc/huge_page_aware_allocator_test.cc
+index ff8a846f..79311cf5 100644
+--- a/tcmalloc/huge_page_aware_allocator_test.cc
++++ b/tcmalloc/huge_page_aware_allocator_test.cc
+@@ -2266,7 +2266,7 @@ TEST(HugePageAwareAllocatorTest, ReleaseMaxSampledPages) {
+        {MemoryTag::kSampled, MemoryTag::kSampledP1, MemoryTag::kNormal}) {
+     // Under sanitizers the tag is narrower and kSampledP1 cannot be encoded in
+     // an address.
+-    if (((static_cast<uintptr_t>(tag) << kTagShift) & kTagMask) >> kTagShift !=
++    if (((static_cast<uintptr_t>(tag) << TagShift()) & TagMask()) >> TagShift() !=
+         static_cast<uintptr_t>(tag)) {
+       continue;
+     }
+diff --git a/tcmalloc/huge_region_fuzz.cc b/tcmalloc/huge_region_fuzz.cc
+index b2ffc1ae..2d9c1b43 100644
+--- a/tcmalloc/huge_region_fuzz.cc
++++ b/tcmalloc/huge_region_fuzz.cc
+@@ -45,7 +45,7 @@ namespace {
+ 
+ void* MakeTaggedAddress(MemoryTag tag) {
+   return reinterpret_cast<void*>(uintptr_t{static_cast<uint8_t>(tag)}
+-                                 << kTagShift);
++                                 << TagShift());
+ }
+ 
+ class NilMemoryTagFunction final : public MemoryTagFunction {
+diff --git a/tcmalloc/huge_region_test.cc b/tcmalloc/huge_region_test.cc
+index 1986a79d..a095e07b 100644
+--- a/tcmalloc/huge_region_test.cc
++++ b/tcmalloc/huge_region_test.cc
+@@ -64,7 +64,7 @@ class MockMemoryTagFunction : public MemoryTagFunction {
+ 
+ void* MakeTaggedAddress(MemoryTag tag) {
+   return reinterpret_cast<void*>(uintptr_t{static_cast<uint8_t>(tag)}
+-                                 << kTagShift);
++                                 << TagShift());
+ }
+ 
+ class HugeRegionTest : public ::testing::Test {
+diff --git a/tcmalloc/internal/BUILD b/tcmalloc/internal/BUILD
+index c3d388c2..85bbf605 100644
+--- a/tcmalloc/internal/BUILD
++++ b/tcmalloc/internal/BUILD
+@@ -519,6 +519,18 @@ cc_test(
+     ],
+ )
+ 
++cc_library(
++    name = "address_bits",
++    srcs = ["address_bits.cc"],
++    hdrs = ["address_bits.h"],
++    visibility = [
++        "//tcmalloc:__subpackages__",
++    ],
++    deps = [
++        ":config",
++    ],
++)
++
+ cc_library(
+     name = "memory_tag",
+     srcs = ["memory_tag.cc"],
+@@ -527,6 +539,7 @@ cc_library(
+         "//tcmalloc:__subpackages__",
+     ],
+     deps = [
++        ":address_bits",
+         ":config",
+         ":logging",
+         ":optimization",
+diff --git a/tcmalloc/internal/address_bits.cc b/tcmalloc/internal/address_bits.cc
+new file mode 100644
+index 00000000..94d12115
+--- /dev/null
++++ b/tcmalloc/internal/address_bits.cc
+@@ -0,0 +1,67 @@
++// Copyright 2026 The TCMalloc Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     https://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++#include "tcmalloc/internal/address_bits.h"
++
++#include <cstdint>
++
++GOOGLE_MALLOC_SECTION_BEGIN
++namespace tcmalloc {
++namespace tcmalloc_internal {
++
++namespace {
++
++// Returns the 1-based position of the most significant set bit in the
++// current stack pointer.  Linux maps the main stack just below TASK_SIZE,
++// the top of the user address space, so (modulo ASLR within the top
++// region) this is the kernel's user virtual-address width.
++int ProbeStackAddressMsb() {
++  // A plain local: taking its address forces a stack slot; the value itself
++  // is never read.
++  int stack_marker;
++  uintptr_t sp = reinterpret_cast<uintptr_t>(&stack_marker);
++  if (sp == 0) {
++    // Impossible on Linux; fall back to the compile-time maximum rather
++    // than shifting by a bogus amount.
++    return 8 * static_cast<int>(sizeof(void*));
++  }
++  // __builtin_clzll is undefined for 0, excluded above.
++  return 64 - __builtin_clzll(sp);
++}
++
++}  // namespace
++
++int EffectiveAddressBits() {
++#if defined(__aarch64__) && defined(__linux__)
++  // Cached: the address-space width is fixed for the life of the process.
++  // Function-local statics are initialized exactly once, thread-safely.
++  static const int kEffectiveBits = [] {
++    int msb = ProbeStackAddressMsb();
++    // aarch64 Linux kernels always provide at least a 39-bit user address
++    // space (4K pages, VA_BITS=39 is the architectural minimum).
++    if (msb < 39) msb = 39;
++    // The allocator's data structures are sized for kAddressBits; the
++    // effective width can never exceed it.
++    if (msb > kAddressBits) msb = kAddressBits;
++    return msb;
++  }();
++  return kEffectiveBits;
++#else
++  return kAddressBits;
++#endif
++}
++
++}  // namespace tcmalloc_internal
++}  // namespace tcmalloc
++GOOGLE_MALLOC_SECTION_END
+diff --git a/tcmalloc/internal/address_bits.h b/tcmalloc/internal/address_bits.h
+new file mode 100644
+index 00000000..675d2d61
+--- /dev/null
++++ b/tcmalloc/internal/address_bits.h
+@@ -0,0 +1,60 @@
++// Copyright 2026 The TCMalloc Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     https://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++#ifndef TCMALLOC_INTERNAL_ADDRESS_BITS_H_
++#define TCMALLOC_INTERNAL_ADDRESS_BITS_H_
++
++#include "tcmalloc/internal/config.h"
++
++GOOGLE_MALLOC_SECTION_BEGIN
++namespace tcmalloc {
++namespace tcmalloc_internal {
++
++// Effective user virtual-address width, in bits.
++//
++// This is the width of user addresses the running kernel actually provides.
++// kAddressBits (tcmalloc/internal/config.h) remains the *compile-time
++// maximum* that the allocator's data structures (page map, span encodings,
++// statistics) are sized for.
++//
++// On Linux/aarch64, production kernels are commonly built with a narrower
++// user address space than the 48-bit architectural maximum (e.g. Raspberry
++// Pi OS ships CONFIG_ARM64_VA_BITS=39, Android GKI likewise).  A binary that
++// assumes 48 bits generates mmap hints the kernel rejects, and fails at
++// startup (see https://github.com/google/tcmalloc/issues/82).  To keep one
++// binary working across kernels, the width is detected at runtime from the
++// address of the current stack: the kernel places the stack just below the
++// top of the user address space, so the most significant set bit of a stack
++// address reveals the width.  This is the same probe sanitizer runtimes
++// (e.g. TSan's VMA size detection) use; it needs no syscalls and parses no
++// /proc files.
++//
++// The detected value is clamped to [39, kAddressBits]: aarch64 Linux always
++// provides at least a 39-bit user address space, and the allocator can never
++// use more than its compile-time maximum.  On a 48-bit kernel the result is
++// 48 and every downstream computation is bit-identical to before.
++//
++// On all other platforms EffectiveAddressBits() == kAddressBits.
++//
++// The result is cached after the first call; the address-space width cannot
++// change during the lifetime of a process.  Detection itself performs no
++// allocation and takes no locks, so it is safe to call during early
++// allocator initialization.
++int EffectiveAddressBits();
++
++}  // namespace tcmalloc_internal
++}  // namespace tcmalloc
++GOOGLE_MALLOC_SECTION_END
++
++#endif  // TCMALLOC_INTERNAL_ADDRESS_BITS_H_
+diff --git a/tcmalloc/internal/config.h b/tcmalloc/internal/config.h
+index f45000ea..c1fbdc0c 100644
+--- a/tcmalloc/internal/config.h
++++ b/tcmalloc/internal/config.h
+@@ -136,7 +136,20 @@ namespace tcmalloc_internal {
+ // TODO(b/134686025): Under what operating systems can we decrease it safely to
+ // 47? This lets us use smaller page maps.  On first allocation, a 36-bit page
+ // map uses only 96 KB instead of the 4.5 MB used by a 52-bit page map.
++// Note: many production kernels are built with a narrower user address
++// space (e.g. Raspberry Pi OS and Android GKI ship CONFIG_ARM64_VA_BITS=39).
++// The allocator detects the running kernel's width at runtime (see
++// EffectiveAddressBits() in tcmalloc/internal/address_bits.h), so a single
++// binary works across kernels.  Defining TCMALLOC_ADDRESS_BITS lowers the
++// compile-time maximum instead (which also shrinks the page map); it must
++// not exceed the architectural 48 bits.
++#ifdef TCMALLOC_ADDRESS_BITS
++static_assert(TCMALLOC_ADDRESS_BITS <= 48,
++              "TCMALLOC_ADDRESS_BITS must not exceed 48");
++inline constexpr int kAddressBits = TCMALLOC_ADDRESS_BITS;
++#else
+ inline constexpr int kAddressBits = 48;
++#endif
+ 
+ #if defined(ABSL_HAVE_ADDRESS_SANITIZER) ||   \
+     defined(ABSL_HAVE_HWADDRESS_SANITIZER) || \
+diff --git a/tcmalloc/internal/config_test.cc b/tcmalloc/internal/config_test.cc
+index 48b74272..881f0e4a 100644
+--- a/tcmalloc/internal/config_test.cc
++++ b/tcmalloc/internal/config_test.cc
+@@ -24,6 +24,7 @@
+ #include "absl/strings/str_cat.h"
+ #include "google/protobuf/io/gzip_stream.h"
+ #include "google/protobuf/io/zero_copy_stream_impl.h"
++#include "tcmalloc/internal/address_bits.h"
+ #include "tcmalloc/internal/util.h"
+ 
+ namespace tcmalloc {
+@@ -92,9 +93,39 @@ TEST(AddressBits, CpuVirtualBits) {
+   int levels;
+   ASSERT_TRUE(absl::SimpleAtoi(string_levels, &levels)) << string_levels;
+ 
+-  ASSERT_GE(levels, 3);
+-  const int kImplementedVirtualBits = 39 + (levels - 3) * 9;
+-  ASSERT_EQ(kAddressBits, kImplementedVirtualBits);
++  // Prefer the kernel's own CONFIG_ARM64_VA_BITS value when present; it is
++  // exact, unlike the page-table-level derivation below (which cannot
++  // distinguish e.g. 47-bit from 39-bit configurations).
++  constexpr absl::string_view va_bits_token = "CONFIG_ARM64_VA_BITS=";
++  int kImplementedVirtualBits = 0;
++  auto va_pos = config.find(va_bits_token);
++  if (va_pos != std::string::npos) {
++    va_pos += va_bits_token.size();
++    auto va_eol = config.find('\n', va_pos);
++    ASSERT_NE(va_eol, std::string::npos);
++    ASSERT_NE(va_eol, va_pos);
++    absl::string_view string_va_bits(&config[va_pos], va_eol - va_pos);
++    ASSERT_TRUE(absl::SimpleAtoi(string_va_bits, &kImplementedVirtualBits))
++        << string_va_bits;
++  } else {
++    constexpr absl::string_view token = "CONFIG_PGTABLE_LEVELS=";
++    ASSERT_THAT(config, testing::HasSubstr(token));
++    auto position = config.find(token);
++    ASSERT_NE(position, std::string::npos);
++    position += token.size();
++    auto eol = config.find('\n', position);
++    ASSERT_NE(eol, std::string::npos);
++    ASSERT_NE(eol, position);
++    absl::string_view string_levels(&config[position], eol - position);
++    int levels;
++    ASSERT_TRUE(absl::SimpleAtoi(string_levels, &levels)) << string_levels;
++
++    ASSERT_GE(levels, 3);
++    kImplementedVirtualBits = 39 + (levels - 3) * 9;
++  }
++  // The allocator detects the kernel's address width at runtime; the
++  // compile-time maximum only needs to cover it.
++  ASSERT_EQ(EffectiveAddressBits(), kImplementedVirtualBits);
+   ASSERT_GE(kAddressBits, std::min(kImplementedVirtualBits, kPointerBits));
+ #endif
+ }
+diff --git a/tcmalloc/internal/memory_tag.h b/tcmalloc/internal/memory_tag.h
+index e87a5728..4b065d90 100644
+--- a/tcmalloc/internal/memory_tag.h
++++ b/tcmalloc/internal/memory_tag.h
+@@ -15,10 +15,10 @@
+ #ifndef TCMALLOC_INTERNAL_MEMORY_TAG_H_
+ #define TCMALLOC_INTERNAL_MEMORY_TAG_H_
+ 
+-#include <algorithm>
+ #include <cstdint>
+ 
+ #include "absl/strings/string_view.h"
++#include "tcmalloc/internal/address_bits.h"
+ #include "tcmalloc/internal/config.h"
+ #include "tcmalloc/internal/logging.h"
+ 
+@@ -41,13 +41,29 @@ enum class MemoryTag : uint8_t {
+   kMetadata = 0x3,
+ };
+ 
+-inline constexpr uintptr_t kTagShift = std::min(kAddressBits - 4, 42);
+-inline constexpr uintptr_t kTagMask =
+-    uintptr_t{kSanitizerAddressSpace ? 0x3 : 0x7} << kTagShift;
++inline uintptr_t TagShift() {
++  // The tag bits ride just below the top of the *effective* user address
++  // space, so that one binary keeps working on kernels built with a narrower
++  // virtual address width (e.g. 39-bit Raspberry Pi OS kernels).  The values
++  // are cached after first use; the width cannot change during the lifetime
++  // of a process.  On a 48-bit kernel this evaluates to 42, exactly the
++  // previous compile-time constant.
++  static const uintptr_t kShift = [] {
++    const uintptr_t shift = static_cast<uintptr_t>(EffectiveAddressBits()) - 4;
++    return shift < 42 ? shift : 42;
++  }();
++  return kShift;
++}
++
++inline uintptr_t TagMask() {
++  static const uintptr_t kMask =
++      uintptr_t{kSanitizerAddressSpace ? 0x3 : 0x7} << TagShift();
++  return kMask;
++}
+ 
+ [[nodiscard]] inline MemoryTag GetMemoryTag(const void* ptr) {
+-  return static_cast<MemoryTag>((reinterpret_cast<uintptr_t>(ptr) & kTagMask) >>
+-                                kTagShift);
++  return static_cast<MemoryTag>((reinterpret_cast<uintptr_t>(ptr) & TagMask()) >>
++                                TagShift());
+ }
+ 
+ [[nodiscard]] inline bool IsNormalMemory(const void* ptr) {
+diff --git a/tcmalloc/internal/system_allocator.h b/tcmalloc/internal/system_allocator.h
+index ed402a12..45d5350e 100644
+--- a/tcmalloc/internal/system_allocator.h
++++ b/tcmalloc/internal/system_allocator.h
+@@ -20,6 +20,7 @@
+ 
+ #include <asm/unistd.h>
+ 
++#include <algorithm>
+ #include <cstring>
+ #include <optional>
+ 
+@@ -119,7 +120,7 @@ class SystemAllocator {
+   }
+ 
+   // REQUIRES: "alignment" is a power of two or "0" to indicate default
+-  // alignment REQUIRES: "alignment" and "size" <= kTagMask
++  // alignment REQUIRES: "alignment" and "size" <= TagMask()
+   //
+   // Allocate and return "bytes" of zeroed memory.  The allocator may optionally
+   // return more bytes than asked for (i.e. return an entire "huge" page).
+@@ -190,10 +191,10 @@ class SystemAllocator {
+   void SetRegionFactory(AddressRegionFactory* factory);
+ 
+   // Reserves using mmap() a region of memory of the requested size and
+-  // alignment, with the bits specified by kTagMask set according to tag.
++  // alignment, with the bits specified by TagMask() set according to tag.
+   //
+-  // REQUIRES: pagesize <= alignment <= kTagMask
+-  // REQUIRES: size <= kTagMask
++  // REQUIRES: pagesize <= alignment <= TagMask()
++  // REQUIRES: size <= TagMask()
+   [[nodiscard]] void* MmapAligned(size_t size, size_t alignment, MemoryTag tag)
+       ABSL_LOCKS_EXCLUDED(spinlock_);
+ 
+@@ -481,7 +482,7 @@ SystemAllocator<Topology, NormalPartitions>::AllocateFromRegion(
+     size_t request_size, size_t alignment, const MemoryTag tag) {
+   using system_allocator_internal::RoundUp;
+ 
+-  constexpr uintptr_t kTagFree = uintptr_t{1} << kTagShift;
++  const uintptr_t kTagFree = uintptr_t{1} << TagShift();
+ 
+   // We do not support size or alignment larger than kTagFree.
+   // TODO(b/141325493): Handle these large allocations.
+@@ -578,8 +579,8 @@ void* SystemAllocator<Topology, NormalPartitions>::MmapAlignedLocked(
+     size_t size, size_t alignment, const MemoryTag tag) {
+   using system_allocator_internal::MapFixedNoReplaceFlagAvailable;
+ 
+-  TC_ASSERT_LE(size, kTagMask);
+-  TC_ASSERT_LE(alignment, kTagMask);
++  TC_ASSERT_LE(size, TagMask());
++  TC_ASSERT_LE(alignment, TagMask());
+ 
+   std::optional<int> numa_partition;
+   uintptr_t& next_addr =
+@@ -863,7 +864,13 @@ uintptr_t SystemAllocator<Topology, NormalPartitions>::RandomMmapHint(
+   //
+   //  *  Below that, the top highest the hardware allows us to use, since it is
+   //     reserved for kernel space addresses.
+-  constexpr uintptr_t kAddrMask = (uintptr_t{1} << (kAddressBits - 1)) - 1;
++  //
++  // The mask is clamped to the address space the running kernel provides
++  // (EffectiveAddressBits()): on kernels with a narrower user address space
++  // than the compile-time maximum (e.g. 39-bit Raspberry Pi OS kernels),
++  // hints above the kernel's limit would be rejected by mmap, so we must not
++  // generate them.  On a 48-bit kernel this is bit-identical to before.
++  const uintptr_t kAddrMask = (uintptr_t{1} << (EffectiveAddressBits() - 1)) - 1;
+ #else
+   // MSan and TSan use up all of the lower address space, so we allow use of
+   // mid-upper address space when they're active.  This only matters for
+@@ -878,8 +885,8 @@ uintptr_t SystemAllocator<Topology, NormalPartitions>::RandomMmapHint(
+   uintptr_t addr;
+   do {
+     rnd_ = ExponentialBiased::NextRandom(rnd_);
+-    addr = rnd_ & kAddrMask & ~(alignment - 1) & ~kTagMask;
+-    addr |= static_cast<uintptr_t>(tag) << kTagShift;
++    addr = rnd_ & kAddrMask & ~(alignment - 1) & ~TagMask();
++    addr |= static_cast<uintptr_t>(tag) << TagShift();
+   } while (addr == 0);
+ 
+ #if defined(ABSL_HAVE_THREAD_SANITIZER)
+@@ -912,11 +919,17 @@ uintptr_t SystemAllocator<Topology, NormalPartitions>::RandomMmapHint(
+            (a >= kHiAppMemBeg && a < kHiAppMemEnd);
+   };
+ 
++  // Sanitizer builds keep the previous compile-time tag placement; the
++  // hardcoded app-memory ranges above already assume the full address
++  // space and sanitizer runs are test-only configurations.
++  constexpr uintptr_t kTagShiftC = std::min(kAddressBits - 4, 42);
++  constexpr uintptr_t kTagMaskC =
++      uintptr_t{kSanitizerAddressSpace ? 0x3 : 0x7} << kTagShiftC;
+   for (int i = 0; i < 10 && !reserved_for_app(addr); ++i) {
+     do {
+       rnd_ = ExponentialBiased::NextRandom(rnd_);
+-      addr = rnd_ & kHiAppMask & ~(alignment - 1) & ~kTagMask;
+-      addr |= static_cast<uintptr_t>(tag) << kTagShift;
++      addr = rnd_ & kHiAppMask & ~(alignment - 1) & ~kTagMaskC;
++      addr |= static_cast<uintptr_t>(tag) << kTagShiftC;
+     } while (addr == 0);
+   }
+ #endif
+diff --git a/tcmalloc/internal/system_allocator_test.cc b/tcmalloc/internal/system_allocator_test.cc
+index e56586c9..f4511dad 100644
+--- a/tcmalloc/internal/system_allocator_test.cc
++++ b/tcmalloc/internal/system_allocator_test.cc
+@@ -111,16 +111,16 @@ INSTANTIATE_TEST_SUITE_P(VariedAlignment, MmapAlignedTest,
+                          testing::Values(kSmallButSlowTCMallocPageSize,
+                                          kDefaultTCMallocPageSize,
+                                          kHugePageSize, kMinMmapAlloc,
+-                                         uintptr_t{1} << kTagShift));
++                                         uintptr_t{1} << TagShift()));
+ 
+ TEST_P(MmapAlignedTest, CorrectAlignmentAndTag) {
+   MmapAndCheck(kHugePageSize, GetParam());
+ }
+ 
+-// Ensure mmap sizes near kTagMask still have the correct tag at the beginning
++// Ensure mmap sizes near TagMask() still have the correct tag at the beginning
+ // and end of the mapping.
+ TEST_F(MmapAlignedTest, LargeSizeSmallAlignment) {
+-  MmapAndCheck(uintptr_t{1} << kTagShift, 1 << 12);
++  MmapAndCheck(uintptr_t{1} << TagShift(), 1 << 12);
+ }
+ 
+ TEST(SystemAllocatorTest, ReleaseLockedMemory) {
+diff --git a/tcmalloc/mock_huge_page_static_forwarder.h b/tcmalloc/mock_huge_page_static_forwarder.h
+index e52b4e77..5951a49e 100644
+--- a/tcmalloc/mock_huge_page_static_forwarder.h
++++ b/tcmalloc/mock_huge_page_static_forwarder.h
+@@ -246,21 +246,21 @@ class FakeStaticForwarder : private Parameters {
+         allocation, new_allocation, std::memory_order_relaxed));
+ 
+     void* ptr = reinterpret_cast<void*>(
+-        aligned_allocation | (static_cast<uintptr_t>(tag) << kTagShift));
++        aligned_allocation | (static_cast<uintptr_t>(tag) << TagShift()));
+     TC_CHECK_EQ(GetMemoryTag(ptr), tag);
+     return AddressRange{ptr, bytes};
+   }
+ 
+   void Back(Range r) {
+     const uintptr_t start =
+-        reinterpret_cast<uintptr_t>(r.p.start_addr()) & ~kTagMask;
++        reinterpret_cast<uintptr_t>(r.p.start_addr()) & ~TagMask();
+     const uintptr_t end = start + r.n.in_bytes();
+     TC_CHECK_LE(end, fake_allocation_);
+   }
+ 
+   [[nodiscard]] MemoryModifyStatus ReleasePages(Range r) {
+     const uintptr_t start =
+-        reinterpret_cast<uintptr_t>(r.p.start_addr()) & ~kTagMask;
++        reinterpret_cast<uintptr_t>(r.p.start_addr()) & ~TagMask();
+     const uintptr_t end = start + r.n.in_bytes();
+     TC_CHECK_LE(end, fake_allocation_);
+     CheckNotLive(r);
+diff --git a/tcmalloc/tcmalloc.cc b/tcmalloc/tcmalloc.cc
+index 23b9a6a4..a656a54c 100644
+--- a/tcmalloc/tcmalloc.cc
++++ b/tcmalloc/tcmalloc.cc
+@@ -778,18 +778,26 @@ static constexpr uintptr_t kBadAlignmentMask =
+     static_cast<uintptr_t>(kAlignment) - 1u;
+ // kNormalMask covers both kNormal and kNormalP1 because they share an
+ // overlapping tag bit.  This is the same property IsNormalMemory relies on.
+-static constexpr uintptr_t kNormalMask =
+-    static_cast<uintptr_t>(MemoryTag::kNormal) << kTagShift;
+-static constexpr uintptr_t kColdMask = static_cast<uintptr_t>(MemoryTag::kCold)
+-                                       << kTagShift;
++// NB: dynamic (not constexpr): the tag placement now depends on the
++// runtime-detected address width (see TagShift()/TagMask()).
++static const uintptr_t kNormalMask =
++    static_cast<uintptr_t>(MemoryTag::kNormal) << TagShift();
++// NB: dynamic (not constexpr): the tag placement now depends on the
++// runtime-detected address width (see TagShift()/TagMask()).
++static const uintptr_t kColdMask = static_cast<uintptr_t>(MemoryTag::kCold)
++                                       << TagShift();
+ static_assert((static_cast<uintptr_t>(MemoryTag::kNormal) &
+                static_cast<uintptr_t>(MemoryTag::kNormalP1)) != 0);
+ 
+-static constexpr uintptr_t kNormalOrBadDeallocationMask =
++// NB: dynamic (not constexpr): the tag placement now depends on the
++// runtime-detected address width (see TagShift()/TagMask()).
++static const uintptr_t kNormalOrBadDeallocationMask =
+     kBadDeallocationHighMask | kNormalMask | kBadAlignmentMask;
+ 
+-static constexpr uintptr_t kTagOrBadDeallocationMask =
+-    kBadDeallocationHighMask | kTagMask | kBadAlignmentMask;
++// NB: dynamic (not constexpr): the tag placement now depends on the
++// runtime-detected address width (see TagShift()/TagMask()).
++static const uintptr_t kTagOrBadDeallocationMask =
++    kBadDeallocationHighMask | TagMask() | kBadAlignmentMask;
+ 
+ template <typename Policy>
+ ABSL_ATTRIBUTE_NOINLINE static void do_unsized_free_irregular(void* ptr,
