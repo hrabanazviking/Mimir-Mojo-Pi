@@ -175,6 +175,12 @@ Related work: [Project Aesir](https://github.com/hrabanazviking/RuneForgeAI-Proj
 [Hailo-10 open-stack roadmap](https://github.com/hrabanazviking/RuneForgeAI-Project-Aesir)
 (independent host-stack work, tracked in the Aesir repo).
 
+---
+
+![https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/Viking_Apache_V2_1.jpg](https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/Viking_Apache_V2_1.jpg)
+
+---
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE). This matches both upstreams the
