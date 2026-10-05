@@ -16,6 +16,10 @@ only work on one machine.
 
 ---
 
+![https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/Cyber_Viking%20Forge_%20Bug_Hunting_Workshop.png](https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/Cyber_Viking%20Forge_%20Bug_Hunting_Workshop.png)
+
+---
+
 ## The problem
 
 On a Raspberry Pi 5 running Raspberry Pi OS (Debian 12, `aarch64`), the `mojo`
