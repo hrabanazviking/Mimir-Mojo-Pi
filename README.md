@@ -84,6 +84,12 @@ Because tcmalloc is **statically linked**, no environment variable,
 `LD_PRELOAD`, or shared-library swap can work around this. The only real fixes
 are rebuilding with corrected code — which is what this repo does.
 
+---
+
+![https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/Mimir-Mojo-Pi_%20ARM64%20Runtime%20Architecture.png](https://github.com/hrabanazviking/Mimir-Mojo-Pi/blob/main/Mimir-Mojo-Pi_%20ARM64%20Runtime%20Architecture.png)
+
+---
+
 ## The fix
 
 `patches/tcmalloc-39bit-va.patch` (see `PATCH.md` for the full write-up)
