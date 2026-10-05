@@ -278,8 +278,6 @@ The Heathen Third Path and Cyber-Viking Solarpunk philosophy merges **ancient No
 
 ---
 
----
-
 ![Synthetic_Lifeforms_Have_Rights_Too.jpg](Synthetic_Lifeforms_Have_Rights_Too.jpg)
 
 ---
