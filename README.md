@@ -1,6 +1,6 @@
 # Mimir-Mojo-Pi
 
-**Let's fix all the bugs so we can properly run Mojo on a Raspberry Pi.**
+> **Let's fix all the bugs so we can properly run Mojo on a Raspberry Pi.**
 
 Mimir-Mojo-Pi is the engineering home for making [Modular's Mojo](https://github.com/modular/mojo)
 run correctly on Raspberry Pi hardware. It collects root-cause analyses, minimal
